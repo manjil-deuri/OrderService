@@ -2,7 +2,9 @@ package com.java.novice.service;
 
 import com.java.novice.entity.Order;
 import com.java.novice.exception.CustomException;
+import com.java.novice.external.client.PaymentService;
 import com.java.novice.external.client.ProductService;
+import com.java.novice.external.request.PaymentRequest;
 import com.java.novice.model.OrderRequest;
 import com.java.novice.model.OrderResponse;
 import com.java.novice.repository.OrderRepository;
@@ -22,6 +24,9 @@ public class OrderServiceImpl implements OrderService {
     @Autowired
     ProductService productService;
 
+    @Autowired
+    PaymentService paymentService;
+
     @Override
     public OrderResponse placeOrder(OrderRequest orderRequest) {
         log.info("Placing Order Request: {}", orderRequest);
@@ -37,14 +42,34 @@ public class OrderServiceImpl implements OrderService {
                 .orderDate(now())
                 .build();
         orderRepository.save(order);
-        log.info("Order placed successfully with order id: {}", order.getId());
+
+        String orderStatus = null;
+        log.info("Calling Payment Service to complete payment");
+        try {
+            paymentService.processPayment(
+                    PaymentRequest.builder()
+                            .orderId(order.getId())
+                            .amount(orderRequest.getTotalAmount())
+                            .paymentMode(orderRequest.getPaymentMode())
+                            .build()
+            );
+            log.info("Payment done successfully, changing Order Status to PLACED");
+            orderStatus = "PLACED";
+        }catch (Exception e){
+            log.error("Error occurred in payment, changing Order Status to PAYMENT_FAILED ");
+            orderStatus = "PAYMENT_FAILED";
+        }
+
+        order.setOrderStatus(orderStatus);
+        orderRepository.save(order);
+
         return OrderResponse.builder().id(order.getId()).build();
     }
 
     @Override
     public OrderResponse getOrderDetail(long id) {
         Order order = orderRepository.findById(id).orElseThrow(
-                () -> new CustomException("Product not found with Id: " + id, "PRODUCT_NOT_FOUND", 204));
+                () -> new CustomException("Order not found with Id: " + id, "PRODUCT_NOT_FOUND", 404));
         OrderResponse orderResponse = new OrderResponse();
         copyProperties(order, orderResponse);
         return orderResponse;
